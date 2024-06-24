@@ -1,166 +1,138 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
+
+	"github.com/jfrog/jfrog-client-go/artifactory"
+	"github.com/jfrog/jfrog-client-go/artifactory/services"
+	"github.com/jfrog/jfrog-client-go/auth"
+	"github.com/jfrog/jfrog-client-go/config"
+	"github.com/jfrog/jfrog-client-go/utils/log"
 )
 
-// RepositoryConfig represents the configuration for a new repository
-type RepositoryConfig struct {
-	RClass      string `json:"rclass"`
-	PackageType string `json:"packageType"`
-}
-
-// PermissionTargetConfig represents the configuration for a permission target
-type PermissionTargetConfig struct {
-	Name         string            `json:"name"`
-	Repositories []string          `json:"repositories"`
-	Principals   struct {
-		Users  map[string][]string `json:"users"`
-		Groups map[string][]string `json:"groups"`
-	} `json:"principals"`
-}
-
 func main() {
-	jfrogURL := os.Getenv("JFROG_URL")        // JFrog URL
-	jfrogAPIKey := os.Getenv("JFROG_API_KEY") // JFrog API Key
+	jfrogURL := os.Getenv("JFROG_URL")
+	jfrogAPIKey := os.Getenv("JFROG_API_KEY")
 
 	if jfrogURL == "" || jfrogAPIKey == "" {
 		fmt.Println("Please set the JFROG_URL and JFROG_API_KEY environment variables.")
 		return
 	}
 
-	// Create Repository
-	repoConfig := RepositoryConfig{
-		RClass:      "local",
+	// Set up Artifactory details
+	serviceDetails := auth.NewArtifactoryDetails()
+	serviceDetails.SetUrl(jfrogURL)
+	serviceDetails.SetApiKey(jfrogAPIKey)
+
+	// Create Artifactory service manager
+	log.SetLogger(log.NewLogger(log.INFO, nil))
+	serviceConfig, err := config.NewConfigBuilder().
+		SetServiceDetails(serviceDetails).
+		Build()
+
+	if err != nil {
+		log.Error(err)
+		return
+	}
+
+	artifactoryServiceManager, err := artifactory.New(serviceConfig)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+
+	// Create repository
+	repoName := "example-repo-local"
+	createRepo(artifactoryServiceManager, repoName)
+
+	// Update permission target
+	permissionTargetName := "existing-permission"
+	users := map[string][]string{
+		"new-user": {"read", "write", "annotate"},
+	}
+	groups := map[string][]string{
+		"existing-group": {"read", "write"},
+	}
+
+	updatePermissionTarget(artifactoryServiceManager, permissionTargetName, repoName, users, groups)
+
+	// Remove group from permission target
+	groupName := "group-to-remove"
+	removeGroupFromPermissionTarget(artifactoryServiceManager, permissionTargetName, groupName)
+}
+
+func createRepo(serviceManager *artifactory.ArtifactoryServicesManager, repoName string) {
+	repoConfig := services.LocalRepositoryBaseParams{
+		RepositoryBaseParams: services.RepositoryBaseParams{
+			Key: repoName,
+		},
 		PackageType: "maven",
 	}
 
-	repoName := "example-repo-local"
-	createRepo(jfrogURL, jfrogAPIKey, repoName, repoConfig)
+	err := serviceManager.CreateLocalRepository(repoConfig)
+	if err != nil {
+		log.Error(err)
+		return
+	}
 
-	// Update Permission Target
-	permissionTargetName := "existing-permission"
-	userName := "new-user" // User to add
-	permissions := []string{"read", "write", "annotate"} // Permissions for the user
-
-	updatePermissionTarget(jfrogURL, jfrogAPIKey, permissionTargetName, repoName, userName, permissions)
+	fmt.Printf("Repository %s created successfully\n", repoName)
 }
 
-func createRepo(jfrogURL, jfrogAPIKey, repoName string, config RepositoryConfig) {
-	jsonData, err := json.Marshal(config)
+func updatePermissionTarget(serviceManager *artifactory.ArtifactoryServicesManager, permissionTargetName, repoName string, users, groups map[string][]string) {
+	permissionTargetParams := services.PermissionTargetParams{
+		Name: permissionTargetName,
+	}
+
+	permissionTarget, err := serviceManager.GetPermissionTarget(permissionTargetName)
 	if err != nil {
-		fmt.Printf("Error marshalling JSON: %s\n", err)
+		log.Error(err)
 		return
 	}
 
-	req, err := http.NewRequest("PUT", fmt.Sprintf("%s/artifactory/api/repositories/%s", jfrogURL, repoName), bytes.NewBuffer(jsonData))
-	if err != nil {
-		fmt.Printf("Error creating HTTP request: %s\n", err)
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-JFrog-Art-Api", jfrogAPIKey)
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Printf("Error sending HTTP request: %s\n", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("Error reading HTTP response: %s\n", err)
-		return
-	}
-
-	fmt.Printf("Create Repository - Response Status: %s\n", resp.Status)
-	fmt.Printf("Create Repository - Response Body: %s\n", string(body))
-}
-
-func updatePermissionTarget(jfrogURL, jfrogAPIKey, permissionTargetName, repoName, userName string, permissions []string) {
-	// Get existing permission target
-	permissionTarget, err := getPermissionTarget(jfrogURL, jfrogAPIKey, permissionTargetName)
-	if err != nil {
-		fmt.Printf("Error getting permission target: %s\n", err)
-		return
-	}
-
-	// Add new repository to the list of repositories
+	// Add repository to the permission target
 	permissionTarget.Repositories = append(permissionTarget.Repositories, repoName)
 
-	// Add user to the principals if not already present
+	// Add users to the permission target
 	if permissionTarget.Principals.Users == nil {
 		permissionTarget.Principals.Users = make(map[string][]string)
 	}
-	permissionTarget.Principals.Users[userName] = permissions
+	for user, perms := range users {
+		permissionTarget.Principals.Users[user] = perms
+	}
 
-	jsonData, err := json.Marshal(permissionTarget)
+	// Add groups to the permission target
+	if permissionTarget.Principals.Groups == nil {
+		permissionTarget.Principals.Groups = make(map[string][]string)
+	}
+	for group, perms := range groups {
+		permissionTarget.Principals.Groups[group] = perms
+	}
+
+	err = serviceManager.UpdatePermissionTarget(*permissionTarget)
 	if err != nil {
-		fmt.Printf("Error marshalling JSON: %s\n", err)
+		log.Error(err)
 		return
 	}
 
-	req, err := http.NewRequest("PUT", fmt.Sprintf("%s/artifactory/api/security/permissions/%s", jfrogURL, permissionTargetName), bytes.NewBuffer(jsonData))
-	if err != nil {
-		fmt.Printf("Error creating HTTP request: %s\n", err)
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-JFrog-Art-Api", jfrogAPIKey)
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Printf("Error sending HTTP request: %s\n", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("Error reading HTTP response: %s\n", err)
-		return
-	}
-
-	fmt.Printf("Update Permission Target - Response Status: %s\n", resp.Status)
-	fmt.Printf("Update Permission Target - Response Body: %s\n", string(body))
+	fmt.Printf("Permission target %s updated successfully\n", permissionTargetName)
 }
 
-func getPermissionTarget(jfrogURL, jfrogAPIKey, permissionTargetName string) (*PermissionTargetConfig, error) {
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/artifactory/api/security/permissions/%s", jfrogURL, permissionTargetName), nil)
+func removeGroupFromPermissionTarget(serviceManager *artifactory.ArtifactoryServicesManager, permissionTargetName, groupName string) {
+	permissionTarget, err := serviceManager.GetPermissionTarget(permissionTargetName)
 	if err != nil {
-		return nil, fmt.Errorf("error creating HTTP request: %w", err)
+		log.Error(err)
+		return
 	}
-	req.Header.Set("X-JFrog-Art-Api", jfrogAPIKey)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	// Remove group from permission target
+	delete(permissionTarget.Principals.Groups, groupName)
+
+	err = serviceManager.UpdatePermissionTarget(*permissionTarget)
 	if err != nil {
-		return nil, fmt.Errorf("error sending HTTP request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("error reading HTTP response: %w", err)
+		log.Error(err)
+		return
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get permission target. Status: %s, Response: %s", resp.Status, string(body))
-	}
-
-	var permissionTarget PermissionTargetConfig
-	err = json.Unmarshal(body, &permissionTarget)
-	if err != nil {
-		return nil, fmt.Errorf("error unmarshalling JSON: %w", err)
-	}
-
-	return &permissionTarget, nil
+	fmt.Printf("Group %s removed from permission target %s successfully\n", groupName, permissionTargetName)
 }
