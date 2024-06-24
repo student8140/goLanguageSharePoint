@@ -1,143 +1,186 @@
 package main
 
 import (
-    "fmt"
-    "os"
-
-    "github.com/jfrog/jfrog-client-go/artifactory"
-    "github.com/jfrog/jfrog-client-go/artifactory/services"
-    "github.com/jfrog/jfrog-client-go/auth"
-    "github.com/jfrog/jfrog-client-go/config"
-    "github.com/jfrog/jfrog-client-go/utils/log"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
+	"log"
+	"net/http"
 )
 
+// Azure SharePoint list credentials and endpoint
+const (
+	sharePointURL = "https://your-sharepoint-site.sharepoint.com/sites/your-site/_api/web/lists/getbytitle('YourListName')/items"
+	username      = "your-username@your-domain.com"
+	password      = "your-password"
+)
+
+// JFrog Artifactory API base URL and API key
+const (
+	artifactoryBaseURL = "https://your-artifactory-url/artifactory/api"
+	artifactoryAPIKey  = "your-api-key"
+)
+
+// Struct to unmarshal SharePoint list item JSON
+type SharePointListItem struct {
+	Title     string `json:"Title"`
+	RepoKey   string `json:"RepoKey"`
+	GroupName string `json:"GroupName"`
+	PermName  string `json:"PermissionName"`
+}
+
+// Function to fetch SharePoint list items
+func fetchSharePointListItems() ([]SharePointListItem, error) {
+	client := &http.Client{}
+
+	req, err := http.NewRequest("GET", sharePointURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error creating SharePoint request: %v", err)
+	}
+
+	req.SetBasicAuth(username, password)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error executing SharePoint request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading SharePoint response body: %v", err)
+	}
+
+	var result struct {
+		Value []SharePointListItem `json:"value"`
+	}
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing SharePoint response: %v", err)
+	}
+
+	return result.Value, nil
+}
+
+// CreateRepository creates a new repository in JFrog Artifactory
+func CreateRepository(repoKey string) error {
+	repoBody := map[string]interface{}{
+		"rclass":      "local",
+		"packageType": "generic",
+		"key":         repoKey,
+	}
+
+	body, _ := json.Marshal(repoBody)
+	req, err := http.NewRequest("PUT", artifactoryBaseURL+"/repositories/"+repoKey, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("error creating repository request: %v", err)
+	}
+
+	req.Header.Set("X-JFrog-Art-Api", artifactoryAPIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("error creating repository: %v", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := ioutil.ReadAll(resp.Body)
+	fmt.Println("Repository created:", resp.Status, string(respBody))
+
+	return nil
+}
+
+// CreateGroup creates a new group in JFrog Artifactory
+func CreateGroup(groupName string) error {
+	groupBody := map[string]interface{}{
+		"name":        groupName,
+		"description": "This is a new group",
+	}
+
+	body, _ := json.Marshal(groupBody)
+	req, err := http.NewRequest("PUT", artifactoryBaseURL+"/security/groups/"+groupName, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("error creating group request: %v", err)
+	}
+
+	req.Header.Set("X-JFrog-Art-Api", artifactoryAPIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("error creating group: %v", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := ioutil.ReadAll(resp.Body)
+	fmt.Println("Group created:", resp.Status, string(respBody))
+
+	return nil
+}
+
+// CreatePermissionTarget creates a new permission target in JFrog Artifactory
+func CreatePermissionTarget(permissionName, repoKey, groupName string) error {
+	permissionBody := map[string]interface{}{
+		"name": permissionName,
+		"repositories": []string{
+			repoKey,
+		},
+		"principals": map[string]interface{}{
+			"groups": map[string][]string{
+				groupName: {"r", "w", "m", "d", "n"},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(permissionBody)
+	req, err := http.NewRequest("PUT", artifactoryBaseURL+"/security/permissions/"+permissionName, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("error creating permission target request: %v", err)
+	}
+
+	req.Header.Set("X-JFrog-Art-Api", artifactoryAPIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("error creating permission target: %v", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := ioutil.ReadAll(resp.Body)
+	fmt.Println("Permission target created:", resp.Status, string(respBody))
+
+	return nil
+}
+
 func main() {
-    jfrogURL := os.Getenv("JFROG_URL")
-    jfrogAPIKey := os.Getenv("JFROG_API_KEY")
+	// Fetch SharePoint list items
+	items, err := fetchSharePointListItems()
+	if err != nil {
+		log.Fatalf("Error fetching SharePoint list items: %v", err)
+	}
 
-    if jfrogURL == "" || jfrogAPIKey == "" {
-        fmt.Println("Please set the JFROG_URL and JFROG_API_KEY environment variables.")
-        return
-    }
+	// Process each item
+	for _, item := range items {
+		err := CreateRepository(item.RepoKey)
+		if err != nil {
+			log.Printf("Error creating repository %s: %v", item.RepoKey, err)
+		}
 
-    // Set up Artifactory details
-    serviceDetails := auth.NewServiceDetails()
-    serviceDetails.SetUrl(jfrogURL)
-    serviceDetails.SetApiKey(jfrogAPIKey)
+		err = CreateGroup(item.GroupName)
+		if err != nil {
+			log.Printf("Error creating group %s: %v", item.GroupName, err)
+		}
 
-    // Create Artifactory service manager
-    log.SetLogger(log.NewLogger(log.INFO, nil))
-    serviceConfig, err := config.NewConfigBuilder().
-        SetServiceDetails(serviceDetails).
-        Build()
-
-    if err != nil {
-        log.Error(err)
-        return
-    }
-
-    artifactoryServiceManager, err := artifactory.New(serviceConfig)
-    if err != nil {
-        log.Error(err)
-        return
-    }
-
-    // Create repository
-    repoName := "example-repo-local"
-    createRepo(artifactoryServiceManager, repoName)
-
-    // Create new group
-    groupName := "new-group"
-    createGroup(artifactoryServiceManager, groupName)
-
-    // Create new permission target
-    permissionTargetName := "new-permission"
-    users := map[string][]string{
-        "new-user": {"read", "write", "annotate"},
-    }
-    groups := map[string][]string{
-        groupName: {"read", "write"},
-    }
-
-    createPermissionTarget(artifactoryServiceManager, permissionTargetName, repoName, users, groups)
-
-    // Add group to existing permission target
-    existingPermissionTargetName := "existing-permission"
-    addGroupToPermissionTarget(artifactoryServiceManager, existingPermissionTargetName, groupName, []string{"read", "write"})
-}
-
-func createRepo(serviceManager *artifactory.ArtifactoryServicesManager, repoName string) {
-    repoConfig := services.LocalRepositoryBaseParams{
-        RepositoryBaseParams: services.RepositoryBaseParams{
-            Key: repoName,
-        },
-        PackageType: "maven",
-    }
-
-    err := serviceManager.CreateLocalRepository(repoConfig)
-    if err != nil {
-        log.Error(err)
-        return
-    }
-
-    fmt.Printf("Repository %s created successfully\n", repoName)
-}
-
-func createGroup(serviceManager *artifactory.ArtifactoryServicesManager, groupName string) {
-    groupParams := services.GroupParams{
-        GroupDetails: services.Group{
-            Name: groupName,
-        },
-    }
-
-    err := serviceManager.CreateGroup(groupParams)
-    if err != nil {
-        log.Error(err)
-        return
-    }
-
-    fmt.Printf("Group %s created successfully\n", groupName)
-}
-
-func createPermissionTarget(serviceManager *artifactory.ArtifactoryServicesManager, permissionTargetName, repoName string, users, groups map[string][]string) {
-    permissionTargetParams := services.PermissionTargetParams{
-        Name: permissionTargetName,
-        Repositories: []string{
-            repoName,
-        },
-        Principals: services.Principals{
-            Users:  users,
-            Groups: groups,
-        },
-    }
-
-    err := serviceManager.CreatePermissionTarget(permissionTargetParams)
-    if err != nil {
-        log.Error(err)
-        return
-    }
-
-    fmt.Printf("Permission target %s created successfully\n", permissionTargetName)
-}
-
-func addGroupToPermissionTarget(serviceManager *artifactory.ArtifactoryServicesManager, permissionTargetName, groupName string, permissions []string) {
-    permissionTarget, err := serviceManager.GetPermissionTarget(permissionTargetName)
-    if err != nil {
-        log.Error(err)
-        return
-    }
-
-    // Add group to the permission target
-    if permissionTarget.Principals.Groups == nil {
-        permissionTarget.Principals.Groups = make(map[string][]string)
-    }
-    permissionTarget.Principals.Groups[groupName] = permissions
-
-    err = serviceManager.UpdatePermissionTarget(*permissionTarget)
-    if err != nil {
-        log.Error(err)
-        return
-    }
-
-    fmt.Printf("Group %s added to permission target %s successfully\n", groupName, permissionTargetName)
+		err = CreatePermissionTarget(item.PermName, item.RepoKey, item.GroupName)
+		if err != nil {
+			log.Printf("Error creating permission target %s: %v", item.PermName, err)
+		}
+	}
 }
