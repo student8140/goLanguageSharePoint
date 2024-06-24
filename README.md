@@ -46,20 +46,24 @@ func main() {
 	repoName := "example-repo-local"
 	createRepo(artifactoryServiceManager, repoName)
 
-	// Update permission target
-	permissionTargetName := "existing-permission"
+	// Create new group
+	groupName := "new-group"
+	createGroup(artifactoryServiceManager, groupName)
+
+	// Create new permission target
+	permissionTargetName := "new-permission"
 	users := map[string][]string{
 		"new-user": {"read", "write", "annotate"},
 	}
 	groups := map[string][]string{
-		"existing-group": {"read", "write"},
+		groupName: {"read", "write"},
 	}
 
-	updatePermissionTarget(artifactoryServiceManager, permissionTargetName, repoName, users, groups)
+	createPermissionTarget(artifactoryServiceManager, permissionTargetName, repoName, users, groups)
 
-	// Remove group from permission target
-	groupName := "group-to-remove"
-	removeGroupFromPermissionTarget(artifactoryServiceManager, permissionTargetName, groupName)
+	// Add group to existing permission target
+	existingPermissionTargetName := "existing-permission"
+	addGroupToPermissionTarget(artifactoryServiceManager, existingPermissionTargetName, groupName, []string{"read", "write"})
 }
 
 func createRepo(serviceManager *artifactory.ArtifactoryServicesManager, repoName string) {
@@ -79,35 +83,53 @@ func createRepo(serviceManager *artifactory.ArtifactoryServicesManager, repoName
 	fmt.Printf("Repository %s created successfully\n", repoName)
 }
 
-func updatePermissionTarget(serviceManager *artifactory.ArtifactoryServicesManager, permissionTargetName, repoName string, users, groups map[string][]string) {
-	permissionTargetParams := services.PermissionTargetParams{
-		Name: permissionTargetName,
+func createGroup(serviceManager *artifactory.ArtifactoryServicesManager, groupName string) {
+	groupParams := services.GroupParams{
+		Name: groupName,
 	}
 
+	err := serviceManager.CreateGroup(groupParams)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+
+	fmt.Printf("Group %s created successfully\n", groupName)
+}
+
+func createPermissionTarget(serviceManager *artifactory.ArtifactoryServicesManager, permissionTargetName, repoName string, users, groups map[string][]string) {
+	permissionTargetParams := services.PermissionTargetParams{
+		Name: permissionTargetName,
+		Repositories: []string{
+			repoName,
+		},
+		Principals: services.Principals{
+			Users:  users,
+			Groups: groups,
+		},
+	}
+
+	err := serviceManager.CreatePermissionTarget(permissionTargetParams)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+
+	fmt.Printf("Permission target %s created successfully\n", permissionTargetName)
+}
+
+func addGroupToPermissionTarget(serviceManager *artifactory.ArtifactoryServicesManager, permissionTargetName, groupName string, permissions []string) {
 	permissionTarget, err := serviceManager.GetPermissionTarget(permissionTargetName)
 	if err != nil {
 		log.Error(err)
 		return
 	}
 
-	// Add repository to the permission target
-	permissionTarget.Repositories = append(permissionTarget.Repositories, repoName)
-
-	// Add users to the permission target
-	if permissionTarget.Principals.Users == nil {
-		permissionTarget.Principals.Users = make(map[string][]string)
-	}
-	for user, perms := range users {
-		permissionTarget.Principals.Users[user] = perms
-	}
-
-	// Add groups to the permission target
+	// Add group to the permission target
 	if permissionTarget.Principals.Groups == nil {
 		permissionTarget.Principals.Groups = make(map[string][]string)
 	}
-	for group, perms := range groups {
-		permissionTarget.Principals.Groups[group] = perms
-	}
+	permissionTarget.Principals.Groups[groupName] = permissions
 
 	err = serviceManager.UpdatePermissionTarget(*permissionTarget)
 	if err != nil {
@@ -115,24 +137,5 @@ func updatePermissionTarget(serviceManager *artifactory.ArtifactoryServicesManag
 		return
 	}
 
-	fmt.Printf("Permission target %s updated successfully\n", permissionTargetName)
-}
-
-func removeGroupFromPermissionTarget(serviceManager *artifactory.ArtifactoryServicesManager, permissionTargetName, groupName string) {
-	permissionTarget, err := serviceManager.GetPermissionTarget(permissionTargetName)
-	if err != nil {
-		log.Error(err)
-		return
-	}
-
-	// Remove group from permission target
-	delete(permissionTarget.Principals.Groups, groupName)
-
-	err = serviceManager.UpdatePermissionTarget(*permissionTarget)
-	if err != nil {
-		log.Error(err)
-		return
-	}
-
-	fmt.Printf("Group %s removed from permission target %s successfully\n", groupName, permissionTargetName)
+	fmt.Printf("Group %s added to permission target %s successfully\n", groupName, permissionTargetName)
 }
