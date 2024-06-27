@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
+	"log"
 	"net/http"
 	"net/url"
 )
@@ -20,32 +21,38 @@ func getAccessToken(clientID, clientSecret, tenantID string) (string, error) {
 
 	req, err := http.NewRequest("POST", authURL, bytes.NewBufferString(data.Encode()))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("error creating request: %w", err)
 	}
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("error making request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to get access token: %s", resp.Status)
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("failed to get access token: %s, response: %s", resp.Status, string(body))
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("error reading response body: %w", err)
 	}
 
 	var result map[string]interface{}
 	if err := json.Unmarshal(body, &result); err != nil {
-		return "", err
+		return "", fmt.Errorf("error unmarshalling response: %w", err)
 	}
 
-	return result["access_token"].(string), nil
+	accessToken, ok := result["access_token"].(string)
+	if !ok {
+		return "", fmt.Errorf("access token not found in response")
+	}
+
+	return accessToken, nil
 }
 
 // Function to get SharePoint list items
@@ -53,7 +60,7 @@ func getSharePointList(accessToken, siteURL, listName string) (string, error) {
 	apiURL := fmt.Sprintf("%s/_api/web/lists/GetByTitle('%s')/items", siteURL, listName)
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("error creating request: %w", err)
 	}
 	req.Header.Add("Authorization", "Bearer "+accessToken)
 	req.Header.Add("Accept", "application/json;odata=verbose")
@@ -61,17 +68,18 @@ func getSharePointList(accessToken, siteURL, listName string) (string, error) {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("error making request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to get list items: %s", resp.Status)
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("failed to get list items: %s, response: %s", resp.Status, string(body))
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("error reading response body: %w", err)
 	}
 
 	return string(body), nil
@@ -88,15 +96,14 @@ func main() {
 	// Get access token
 	token, err := getAccessToken(clientID, clientSecret, tenantID)
 	if err != nil {
-		fmt.Println("Error getting access token:", err)
-		return
+		log.Fatalf("Error getting access token: %v", err)
 	}
+	fmt.Println("Access Token:", token)
 
 	// Get SharePoint list items
 	listItems, err := getSharePointList(token, siteURL, listName)
 	if err != nil {
-		fmt.Println("Error getting SharePoint list:", err)
-		return
+		log.Fatalf("Error getting SharePoint list: %v", err)
 	}
 
 	fmt.Println("SharePoint List Items:", listItems)
