@@ -1,110 +1,126 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"log"
-	"net/http"
-	"net/url"
+    "bytes"
+    "encoding/json"
+    "fmt"
+    "io/ioutil"
+    "net/http"
+    "net/url"
+    "strings"
 )
 
-// Function to get access token
-func getAccessToken(clientID, clientSecret, tenantID string) (string, error) {
-	authURL := "https://login.microsoftonline.com/" + tenantID + "/oauth2/v2.0/token"
-	data := url.Values{}
-	data.Set("grant_type", "client_credentials")
-	data.Set("client_id", clientID)
-	data.Set("client_secret", clientSecret)
-	data.Set("scope", "https://your-tenant.sharepoint.com/.default") // Replace 'your-tenant' with your actual tenant name
+const (
+    tenantID     = "YOUR_TENANT_ID"
+    clientID     = "YOUR_CLIENT_ID"
+    clientSecret = "YOUR_CLIENT_SECRET"
+    siteID       = "YOUR_SITE_ID"
+    listID       = "YOUR_LIST_ID"
+)
 
-	req, err := http.NewRequest("POST", authURL, bytes.NewBufferString(data.Encode()))
-	if err != nil {
-		return "", fmt.Errorf("error creating request: %w", err)
-	}
-	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+func getAccessToken() (string, error) {
+    form := url.Values{}
+    form.Add("grant_type", "client_credentials")
+    form.Add("client_id", clientID)
+    form.Add("client_secret", clientSecret)
+    form.Add("resource", "https://graph.microsoft.com")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("error making request: %w", err)
-	}
-	defer resp.Body.Close()
+    resp, err := http.PostForm(fmt.Sprintf("https://login.microsoftonline.com/%s/oauth2/token", tenantID), form)
+    if err != nil {
+        return "", err
+    }
+    defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("failed to get access token: %s, response: %s", resp.Status, string(body))
-	}
+    body, err := ioutil.ReadAll(resp.Body)
+    if err != nil {
+        return "", err
+    }
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("error reading response body: %w", err)
-	}
+    var result map[string]interface{}
+    if err := json.Unmarshal(body, &result); err != nil {
+        return "", err
+    }
 
-	var result map[string]interface{}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return "", fmt.Errorf("error unmarshalling response: %w", err)
-	}
-
-	accessToken, ok := result["access_token"].(string)
-	if !ok {
-		return "", fmt.Errorf("access token not found in response")
-	}
-
-	return accessToken, nil
+    return result["access_token"].(string), nil
 }
 
-// Function to get SharePoint list items
-func getSharePointList(accessToken, siteURL, listName string) (string, error) {
-	apiURL := fmt.Sprintf("%s/_api/web/lists/GetByTitle('%s')/items", siteURL, listName)
-	req, err := http.NewRequest("GET", apiURL, nil)
-	if err != nil {
-		return "", fmt.Errorf("error creating request: %w", err)
-	}
-	req.Header.Add("Authorization", "Bearer "+accessToken)
-	req.Header.Add("Accept", "application/json;odata=verbose")
+func validateTokenClaims(accessToken string) (bool, error) {
+    parts := strings.Split(accessToken, ".")
+    if len(parts) != 3 {
+        return false, fmt.Errorf("invalid token format")
+    }
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("error making request: %w", err)
-	}
-	defer resp.Body.Close()
+    payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+    if err != nil {
+        return false, err
+    }
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("failed to get list items: %s, response: %s", resp.Status, string(body))
-	}
+    var claims map[string]interface{}
+    if err := json.Unmarshal(payload, &claims); err != nil {
+        return false, err
+    }
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("error reading response body: %w", err)
-	}
+    if scp, ok := claims["scp"]; ok && scp != "" {
+        return true, nil
+    }
+    if roles, ok := claims["roles"]; ok && len(roles.([]interface{})) > 0 {
+        return true, nil
+    }
 
-	return string(body), nil
+    return false, fmt.Errorf("neither scp nor roles claim is present in the token")
 }
 
-// Main function
+func getSharePointList(accessToken string) error {
+    client := &http.Client{}
+    req, err := http.NewRequest("GET", fmt.Sprintf("https://graph.microsoft.com/v1.0/sites/%s/lists/%s/items", siteID, listID), nil)
+    if err != nil {
+        return err
+    }
+
+    req.Header.Set("Authorization", "Bearer "+accessToken)
+    req.Header.Set("Accept", "application/json")
+
+    resp, err := client.Do(req)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+
+    body, err := ioutil.ReadAll(resp.Body)
+    if err != nil {
+        return err
+    }
+
+    var result map[string]interface{}
+    if err := json.Unmarshal(body, &result); err != nil {
+        return err
+    }
+
+    // Process the list items
+    fmt.Println(result)
+
+    return nil
+}
+
 func main() {
-	clientID := "your-client-id"
-	clientSecret := "your-client-secret"
-	tenantID := "your-tenant-id"
-	siteURL := "https://your-tenant.sharepoint.com/sites/yoursite" // Replace 'your-tenant' with your actual tenant name
-	listName := "your-list-name"
+    accessToken, err := getAccessToken()
+    if err != nil {
+        fmt.Println("Error getting access token:", err)
+        return
+    }
 
-	// Get access token
-	token, err := getAccessToken(clientID, clientSecret, tenantID)
-	if err != nil {
-		log.Fatalf("Error getting access token: %v", err)
-	}
-	fmt.Println("Access Token:", token)
+    isValid, err := validateTokenClaims(accessToken)
+    if err != nil {
+        fmt.Println("Error validating token claims:", err)
+        return
+    }
 
-	// Get SharePoint list items
-	listItems, err := getSharePointList(token, siteURL, listName)
-	if err != nil {
-		log.Fatalf("Error getting SharePoint list: %v", err)
-	}
+    if !isValid {
+        fmt.Println("Token does not contain required claims")
+        return
+    }
 
-	fmt.Println("SharePoint List Items:", listItems)
+    if err := getSharePointList(accessToken); err != nil {
+        fmt.Println("Error getting SharePoint list:", err)
+    }
 }
