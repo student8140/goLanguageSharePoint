@@ -10,3 +10,11 @@ client_secret: {client_secret} (the client secret you generated)
 code: {authorization_code} (the authorization code you just obtained)
 redirect_uri: https://localhost (or your specified redirect URI)
 scope: https://graph.microsoft.com/.default
+
+
+client_id: {client_id} (your application/client ID from Azure AD)
+response_type: code
+redirect_uri: https://localhost (or your specified redirect URI)
+response_mode: query
+scope: https://graph.microsoft.com/.default
+state: 12345 (or any random string for state)
