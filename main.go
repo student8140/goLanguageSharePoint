@@ -7,180 +7,241 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 )
 
-// Azure SharePoint list credentials and endpoint
 const (
-	sharePointURL = "https://your-sharepoint-site.sharepoint.com/sites/your-site/_api/web/lists/getbytitle('YourListName')/items"
-	username      = "your-username@your-domain.com"
-	password      = "your-password"
+	tenantID          = "your-tenant-id"
+	clientID          = "your-client-id"
+	clientSecret      = "your-client-secret"
+	sharePointSiteURL = "https://your-sharepoint-site-url"
+	jFrogURL          = "https://your-jfrog-url"
+	jFrogAPIToken     = "your-jfrog-api-token"
 )
 
-// JFrog Artifactory API base URL and API key
-const (
-	artifactoryBaseURL = "https://your-artifactory-url/artifactory/api"
-	artifactoryAPIKey  = "your-api-key"
-)
-
-// Struct to unmarshal SharePoint list item JSON
-type SharePointListItem struct {
-	Title     string `json:"Title"`
-	RepoKey   string `json:"RepoKey"`
-	GroupName string `json:"GroupName"`
-	PermName  string `json:"PermissionName"`
+type SharePointItem struct {
+	PackageType     string `json:"PackageType"`
+	RepoKey         string `json:"RepoKey"`
+	RepoDescription string `json:"RepoDescription"`
+	GroupName       string `json:"GroupName"`
+	GroupDescription string `json:"GroupDescription"`
+	Realm           string `json:"Realm"`
+	PermissionName  string `json:"PermissionName"`
 }
 
-// Function to fetch SharePoint list items
-func fetchSharePointListItems() ([]SharePointListItem, error) {
-	client := &http.Client{}
+func getOAuth2Token() string {
+	form := url.Values{}
+	form.Set("grant_type", "client_credentials")
+	form.Set("client_id", clientID)
+	form.Set("client_secret", clientSecret)
+	form.Set("resource", "https://your-sharepoint-site-url")
 
-	req, err := http.NewRequest("GET", sharePointURL, nil)
+	req, err := http.NewRequest("POST", fmt.Sprintf("https://login.microsoftonline.com/%s/oauth2/token", tenantID), bytes.NewBufferString(form.Encode()))
 	if err != nil {
-		return nil, fmt.Errorf("error creating SharePoint request: %v", err)
+		log.Fatalf("Error creating request: %v", err)
 	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	req.SetBasicAuth(username, password)
-	req.Header.Set("Accept", "application/json")
-
+	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("error executing SharePoint request: %v", err)
+		log.Fatalf("Error sending request: %v", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Fatalf("Error response from OAuth2: %v", resp.Status)
+	}
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("error reading SharePoint response body: %v", err)
+		log.Fatalf("Error reading response body: %v", err)
+	}
+
+	var tokenResponse map[string]interface{}
+	err = json.Unmarshal(body, &tokenResponse)
+	if err != nil {
+		log.Fatalf("Error unmarshaling JSON: %v", err)
+	}
+
+	return tokenResponse["access_token"].(string)
+}
+
+func getSharePointList(accessToken string) []SharePointItem {
+	client := &http.Client{}
+
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/_api/web/lists/getbytitle('YourListName')/items", sharePointSiteURL), nil)
+	if err != nil {
+		log.Fatalf("Error creating request: %v", err)
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", accessToken))
+	req.Header.Set("Accept", "application/json;odata=verbose")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Fatalf("Error sending request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Fatalf("Error response from SharePoint: %v", resp.Status)
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalf("Error reading response body: %v", err)
 	}
 
 	var result struct {
-		Value []SharePointListItem `json:"value"`
+		D struct {
+			Results []SharePointItem `json:"results"`
+		} `json:"d"`
 	}
 	err = json.Unmarshal(body, &result)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing SharePoint response: %v", err)
+		log.Fatalf("Error unmarshaling JSON: %v", err)
 	}
 
-	return result.Value, nil
+	return result.D.Results
 }
 
-// CreateRepository creates a new repository in JFrog Artifactory
-func CreateRepository(repoKey string) error {
-	repoBody := map[string]interface{}{
-		"rclass":      "local",
-		"packageType": "generic",
-		"key":         repoKey,
-	}
-
-	body, _ := json.Marshal(repoBody)
-	req, err := http.NewRequest("PUT", artifactoryBaseURL+"/repositories/"+repoKey, bytes.NewBuffer(body))
-	if err != nil {
-		return fmt.Errorf("error creating repository request: %v", err)
-	}
-
-	req.Header.Set("X-JFrog-Art-Api", artifactoryAPIKey)
-	req.Header.Set("Content-Type", "application/json")
-
+func createJFrogRepository(repoKey, packageType, repoDescription string) {
 	client := &http.Client{}
+
+	repoData := map[string]interface{}{
+		"rclass":       "local",
+		"packageType":  packageType,
+		"repoKey":      repoKey,
+		"description":  repoDescription,
+	}
+	repoJSON, err := json.Marshal(repoData)
+	if err != nil {
+		log.Fatalf("Error marshaling JSON: %v", err)
+	}
+
+	req, err := http.NewRequest("PUT", fmt.Sprintf("%s/artifactory/api/repositories/%s", jFrogURL, repoKey), bytes.NewBuffer(repoJSON))
+	if err != nil {
+		log.Fatalf("Error creating request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", jFrogAPIToken))
+
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("error creating repository: %v", err)
+		log.Fatalf("Error sending request: %v", err)
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := ioutil.ReadAll(resp.Body)
-	fmt.Println("Repository created:", resp.Status, string(respBody))
+	if resp.StatusCode != http.StatusOK {
+		log.Fatalf("Error response from JFrog: %v", resp.Status)
+	}
 
-	return nil
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalf("Error reading response body: %v", err)
+	}
+
+	fmt.Printf("JFrog repository creation response: %s\n", string(body))
 }
 
-// CreateGroup creates a new group in JFrog Artifactory
-func CreateGroup(groupName string) error {
-	groupBody := map[string]interface{}{
+func createJFrogGroup(groupName, groupDescription, realm string) {
+	client := &http.Client{}
+
+	groupData := map[string]interface{}{
 		"name":        groupName,
-		"description": "This is a new group",
+		"description": groupDescription,
+		"realm":       realm,
 	}
-
-	body, _ := json.Marshal(groupBody)
-	req, err := http.NewRequest("PUT", artifactoryBaseURL+"/security/groups/"+groupName, bytes.NewBuffer(body))
+	groupJSON, err := json.Marshal(groupData)
 	if err != nil {
-		return fmt.Errorf("error creating group request: %v", err)
+		log.Fatalf("Error marshaling JSON: %v", err)
 	}
 
-	req.Header.Set("X-JFrog-Art-Api", artifactoryAPIKey)
+	req, err := http.NewRequest("PUT", fmt.Sprintf("%s/artifactory/api/security/groups/%s", jFrogURL, groupName), bytes.NewBuffer(groupJSON))
+	if err != nil {
+		log.Fatalf("Error creating request: %v", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", jFrogAPIToken))
 
-	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("error creating group: %v", err)
+		log.Fatalf("Error sending request: %v", err)
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := ioutil.ReadAll(resp.Body)
-	fmt.Println("Group created:", resp.Status, string(respBody))
+	if resp.StatusCode != http.StatusOK {
+		log.Fatalf("Error response from JFrog: %v", resp.Status)
+	}
 
-	return nil
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalf("Error reading response body: %v", err)
+	}
+
+	fmt.Printf("JFrog group creation response: %s\n", string(body))
 }
 
-// CreatePermissionTarget creates a new permission target in JFrog Artifactory
-func CreatePermissionTarget(permissionName, repoKey, groupName string) error {
-	permissionBody := map[string]interface{}{
+func createJFrogPermission(permissionName, repoKey, groupName string) {
+	client := &http.Client{}
+
+	permissionData := map[string]interface{}{
 		"name": permissionName,
-		"repositories": []string{
-			repoKey,
+		"repo": map[string]interface{}{
+			"include-patterns": []string{"**"},
+			"exclude-patterns": []string{""},
+			"repositories":     []string{repoKey},
 		},
 		"principals": map[string]interface{}{
-			"groups": map[string][]string{
-				groupName: {"r", "w", "m", "d", "n"},
-			},
+			"users":  map[string]interface{}{},
+			"groups": map[string]interface{}{groupName: []string{"r", "w", "n"}},
 		},
 	}
-
-	body, _ := json.Marshal(permissionBody)
-	req, err := http.NewRequest("PUT", artifactoryBaseURL+"/security/permissions/"+permissionName, bytes.NewBuffer(body))
+	permissionJSON, err := json.Marshal(permissionData)
 	if err != nil {
-		return fmt.Errorf("error creating permission target request: %v", err)
+		log.Fatalf("Error marshaling JSON: %v", err)
 	}
 
-	req.Header.Set("X-JFrog-Art-Api", artifactoryAPIKey)
+	req, err := http.NewRequest("PUT", fmt.Sprintf("%s/artifactory/api/security/permissions/%s", jFrogURL, permissionName), bytes.NewBuffer(permissionJSON))
+	if err != nil {
+		log.Fatalf("Error creating request: %v", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", jFrogAPIToken))
 
-	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("error creating permission target: %v", err)
+		log.Fatalf("Error sending request: %v", err)
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := ioutil.ReadAll(resp.Body)
-	fmt.Println("Permission target created:", resp.Status, string(respBody))
+	if resp.StatusCode != http.StatusOK {
+		log.Fatalf("Error response from JFrog: %v", resp.Status)
+	}
 
-	return nil
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalf("Error reading response body: %v", err)
+	}
+
+	fmt.Printf("JFrog permission creation response: %s\n", string(body))
 }
 
 func main() {
-	// Fetch SharePoint list items
-	items, err := fetchSharePointListItems()
-	if err != nil {
-		log.Fatalf("Error fetching SharePoint list items: %v", err)
-	}
+	// Get OAuth2 token for SharePoint
+	accessToken := getOAuth2Token()
 
-	// Process each item
-	for _, item := range items {
-		err := CreateRepository(item.RepoKey)
-		if err != nil {
-			log.Printf("Error creating repository %s: %v", item.RepoKey, err)
-		}
+	// Access SharePoint list and get details
+	sharePointItems := getSharePointList(accessToken)
 
-		err = CreateGroup(item.GroupName)
-		if err != nil {
-			log.Printf("Error creating group %s: %v", item.GroupName, err)
-		}
+	for _, item := range sharePointItems {
+		// Create JFrog repository
+		createJFrogRepository(item.RepoKey, item.PackageType, item.RepoDescription)
 
-		err = CreatePermissionTarget(item.PermName, item.RepoKey, item.GroupName)
-		if err != nil {
-			log.Printf("Error creating permission target %s: %v", item.PermName, err)
-		}
+		// Create JFrog group
+		createJFrogGroup(item.GroupName, item.GroupDescription, item.Realm)
+
+		// Create JFrog permission
+		createJFrogPermission(item.PermissionName, item.RepoKey, item.GroupName)
 	}
 }
