@@ -1,0 +1,12 @@
+{
+  "name": "example-permission",
+  "repositories": ["example-repo"],
+  "principals": {
+    "users": {
+      "example-user": ["read", "write"]
+    },
+    "groups": {
+      "example-group": ["read"]
+    }
+  }
+}
