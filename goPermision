@@ -10,3 +10,6 @@
     }
   }
 }
+
+
+http://<artifactory_url>/artifactory/api/security/permissions/<permission-name>
