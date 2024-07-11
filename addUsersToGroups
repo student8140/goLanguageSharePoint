@@ -1,0 +1,61 @@
+package main
+
+import (
+    "bytes"
+    "encoding/json"
+    "fmt"
+    "net/http"
+)
+
+const (
+    jfrogURL = "https://<your-artifactory-url>/artifactory"
+    apiKey   = "<your-api-key>"
+    groupName = "my-group"
+)
+
+func main() {
+    usersToAdd := []string{"user1", "user2"} // Replace with actual usernames
+
+    err := addUsersToGroup(groupName, usersToAdd)
+    if err != nil {
+        fmt.Println("Error adding users to group:", err)
+        return
+    }
+
+    fmt.Printf("Users added to group '%s' successfully.\n", groupName)
+}
+
+func addUsersToGroup(groupName string, users []string) error {
+    url := fmt.Sprintf("%s/api/security/groups/%s", jfrogURL, groupName)
+
+    // Prepare payload
+    payload := map[string]interface{}{
+        "users": users,
+    }
+    payloadBytes, err := json.Marshal(payload)
+    if err != nil {
+        return err
+    }
+
+    // Create request
+    req, err := http.NewRequest("PUT", url, bytes.NewBuffer(payloadBytes))
+    if err != nil {
+        return err
+    }
+    req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("X-JFrog-Art-Api", apiKey)
+
+    // Send request
+    client := &http.Client{}
+    resp, err := client.Do(req)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != http.StatusOK {
+        return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+    }
+
+    return nil
+}
