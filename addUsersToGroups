@@ -10,8 +10,12 @@ import (
 const (
     jfrogURL = "https://<your-artifactory-url>/artifactory"
     apiKey   = "<your-api-key>"
-    groupName = "my-group"
+    groupName = "<group-name>"
 )
+
+type GroupUpdate struct {
+    Users []string `json:"users"`
+}
 
 func main() {
     usersToAdd := []string{"user1", "user2"} // Replace with actual usernames
@@ -29,8 +33,8 @@ func addUsersToGroup(groupName string, users []string) error {
     url := fmt.Sprintf("%s/api/security/groups/%s", jfrogURL, groupName)
 
     // Prepare payload
-    payload := map[string]interface{}{
-        "users": users,
+    payload := GroupUpdate{
+        Users: users,
     }
     payloadBytes, err := json.Marshal(payload)
     if err != nil {
