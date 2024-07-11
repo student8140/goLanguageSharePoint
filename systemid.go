@@ -1,3 +1,4 @@
+//URL: https://<your-artifactory-url>/artifactory/api/storage/my-repo/path/to/artifact?properties=version=1.0.0;buildNumber=123
 package main
 
 import (
