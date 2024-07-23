@@ -4,62 +4,52 @@ import (
     "bytes"
     "encoding/json"
     "fmt"
+    "io/ioutil"
     "net/http"
+    "os"
 )
-
-const (
-    jfrogURL = "https://<your-artifactory-url>/artifactory"
-    apiKey   = "<your-api-key>"
-    groupName = "<group-name>"
-)
-
-type GroupUpdate struct {
-    Users []string `json:"users"`
-}
 
 func main() {
-    usersToAdd := []string{"user1", "user2"} // Replace with actual usernames
+    // Define the JFrog API URL, API key, group name, and users to be added
+    jfrogURL := "https://your-jfrog-instance/artifactory/api/security/groups/groupName" // Replace with your JFrog URL and group name
+    apiKey := "your-api-key" // Replace with your API key
+    users := []string{"user1", "user2"} // Replace with the users you want to add
 
-    err := addUsersToGroup(groupName, usersToAdd)
+    // Prepare the request body
+    requestBody, err := json.Marshal(map[string]interface{}{
+        "users": users,
+    })
     if err != nil {
-        fmt.Println("Error adding users to group:", err)
+        fmt.Println("Error creating request body:", err)
         return
     }
 
-    fmt.Printf("Users added to group '%s' successfully.\n", groupName)
-}
-
-func addUsersToGroup(groupName string, users []string) error {
-    url := fmt.Sprintf("%s/api/security/groups/%s", jfrogURL, groupName)
-
-    // Prepare payload
-    payload := GroupUpdate{
-        Users: users,
-    }
-    payloadBytes, err := json.Marshal(payload)
+    // Create the HTTP request
+    req, err := http.NewRequest("PUT", jfrogURL, bytes.NewBuffer(requestBody))
     if err != nil {
-        return err
+        fmt.Println("Error creating HTTP request:", err)
+        return
     }
 
-    // Create request
-    req, err := http.NewRequest("PUT", url, bytes.NewBuffer(payloadBytes))
-    if err != nil {
-        return err
-    }
+    // Set the necessary headers
     req.Header.Set("Content-Type", "application/json")
-    req.Header.Set("X-JFrog-Art-Api", apiKey)
+    req.Header.Set("Authorization", "Bearer "+apiKey)
 
-    // Send request
+    // Send the HTTP request
     client := &http.Client{}
     resp, err := client.Do(req)
     if err != nil {
-        return err
+        fmt.Println("Error sending HTTP request:", err)
+        return
     }
     defer resp.Body.Close()
 
+    // Check the response status
     if resp.StatusCode != http.StatusOK {
-        return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+        body, _ := ioutil.ReadAll(resp.Body)
+        fmt.Printf("Failed to add users to group. Status: %s, Body: %s\n", resp.Status, string(body))
+        return
     }
 
-    return nil
+    fmt.Println("Users added to group successfully")
 }
