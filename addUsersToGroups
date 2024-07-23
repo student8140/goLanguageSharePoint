@@ -6,46 +6,91 @@ import (
     "fmt"
     "io/ioutil"
     "net/http"
-    "os"
 )
 
 func main() {
-    // Define the JFrog API URL, API key, group name, and users to be added
-    jfrogURL := "https://your-jfrog-instance/artifactory/api/security/groups/groupName" // Replace with your JFrog URL and group name
+    // Define the JFrog API URL, API key, and the group to be created
+    jfrogURL := "https://your-jfrog-instance/artifactory/api/security/groups/groupName" // Replace with your JFrog URL and desired group name
     apiKey := "your-api-key" // Replace with your API key
-    users := []string{"user1", "user2"} // Replace with the users you want to add
 
-    // Prepare the request body
-    requestBody, err := json.Marshal(map[string]interface{}{
-        "users": users,
+    // Prepare the request body for creating the group
+    createGroupRequestBody, err := json.Marshal(map[string]interface{}{
+        "name": "groupName",    // Replace with the desired group name
+        "description": "Group for managing specific users", // Optional description
     })
     if err != nil {
-        fmt.Println("Error creating request body:", err)
+        fmt.Println("Error creating request body for group creation:", err)
         return
     }
 
-    // Create the HTTP request
-    req, err := http.NewRequest("PUT", jfrogURL, bytes.NewBuffer(requestBody))
+    // Create the HTTP request for creating the group
+    req, err := http.NewRequest("PUT", jfrogURL, bytes.NewBuffer(createGroupRequestBody))
     if err != nil {
-        fmt.Println("Error creating HTTP request:", err)
+        fmt.Println("Error creating HTTP request for group creation:", err)
         return
     }
 
     // Set the necessary headers
     req.Header.Set("Content-Type", "application/json")
-    req.Header.Set("Authorization", "Bearer "+apiKey)
+    req.Header.Set("X-JFrog-Art-Api", apiKey)
 
     // Send the HTTP request
     client := &http.Client{}
     resp, err := client.Do(req)
     if err != nil {
-        fmt.Println("Error sending HTTP request:", err)
+        fmt.Println("Error sending HTTP request for group creation:", err)
         return
     }
     defer resp.Body.Close()
 
     // Check the response status
-    if resp.StatusCode != http.StatusOK {
+    if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+        body, _ := ioutil.ReadAll(resp.Body)
+        fmt.Printf("Failed to create group. Status: %s, Body: %s\n", resp.Status, string(body))
+        return
+    }
+
+    fmt.Println("Group created successfully")
+
+    // Step 2: Add users to the created group
+    addUsersToGroup(jfrogURL, apiKey, []string{"user1", "user2"})
+}
+
+func addUsersToGroup(jfrogURL, apiKey string, users []string) {
+    // Modify the URL to include the action for adding users to the group
+    jfrogURL = fmt.Sprintf("%s/users", jfrogURL)
+
+    // Prepare the request body for adding users to the group
+    addUserRequestBody, err := json.Marshal(map[string]interface{}{
+        "users": users,
+    })
+    if err != nil {
+        fmt.Println("Error creating request body for adding users:", err)
+        return
+    }
+
+    // Create the HTTP request for adding users to the group
+    req, err := http.NewRequest("POST", jfrogURL, bytes.NewBuffer(addUserRequestBody))
+    if err != nil {
+        fmt.Println("Error creating HTTP request for adding users:", err)
+        return
+    }
+
+    // Set the necessary headers
+    req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("X-JFrog-Art-Api", apiKey)
+
+    // Send the HTTP request
+    client := &http.Client{}
+    resp, err := client.Do(req)
+    if err != nil {
+        fmt.Println("Error sending HTTP request for adding users:", err)
+        return
+    }
+    defer resp.Body.Close()
+
+    // Check the response status
+    if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
         body, _ := ioutil.ReadAll(resp.Body)
         fmt.Printf("Failed to add users to group. Status: %s, Body: %s\n", resp.Status, string(body))
         return
