@@ -8,16 +8,17 @@ type Data struct {
 }
 type GraphQLRequest struct {
 	Query     string                 `json:"query"`
-	Variables map[string]interface{} `json:"variables,omitempty"`
+	Variables map[string]interface{} `json:"variables"`
 }
 type GraphQLResponse struct {
 	Data   Data          `json:"data"`
 	Errors []interface{} `json:"errors"`
 }
-func sendGraphQLQuery(url string, token string, query string) (*GraphQLResponse, error) {
+func sendGraphQLQuery(url string, token string, query string, variables map[string]interface{}) (*GraphQLResponse, error) {
 	// Create the request body
 	reqBody := GraphQLRequest{
-		Query: query,
+		Query:     query,
+		Variables: variables,
 	}
 	reqBodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
@@ -56,20 +57,25 @@ func sendGraphQLQuery(url string, token string, query string) (*GraphQLResponse,
 
 	return &graphqlResp, nil
 }
+
 func main() {
 	url := "https://your-graphql-api.com/graphql"
 	token := "your_bearer_token"
 
 	query := `
-		query Entry {
-			entry(id: "123") {
+		query Entry($id: ID!) {
+			entry(id: $id) {
 				id
 				name
 			}
 		}
 	`
 
-	resp, err := sendGraphQLQuery(url, token, query)
+	variables := map[string]interface{}{
+		"id": "123",
+	}
+
+	resp, err := sendGraphQLQuery(url, token, query, variables)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
@@ -87,3 +93,4 @@ func main() {
 		fmt.Printf("GraphQL Errors: %v\n", resp.Errors)
 	}
 }
+
