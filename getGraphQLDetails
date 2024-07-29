@@ -11,13 +11,17 @@ import (
 
 func main() {
     // Define the GraphQL query
-    query := `
+     id := "your-id-value"
+
+    // Define the GraphQL query with the ID variable
+    query := fmt.Sprintf(`
         query {
-            yourQueryName {
+            yourQueryName(id: "%s") {
                 field1
                 field2
             }
         }
+    `, id)
     `
     
     // Create a JSON payload with the query
