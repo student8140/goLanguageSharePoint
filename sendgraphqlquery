@@ -1,0 +1,86 @@
+type Entry struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type Data struct {
+	Entry Entry `json:"entry"`
+}
+
+type GraphQLResponse struct {
+	Data   Data          `json:"data"`
+	Errors []interface{} `json:"errors"`
+}
+func sendGraphQLQuery(url string, token string, query string) (*GraphQLResponse, error) {
+	// Create the request body
+	reqBody := GraphQLRequest{
+		Query: query,
+	}
+	reqBodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	// Create the HTTP request
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(reqBodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	// Set headers
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	// Send the request
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send HTTP request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read and parse the response body
+	respBody, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	var graphqlResp GraphQLResponse
+	err = json.Unmarshal(respBody, &graphqlResp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response body: %w", err)
+	}
+
+	return &graphqlResp, nil
+}
+func main() {
+	url := "https://your-graphql-api.com/graphql"
+	token := "your_bearer_token"
+
+	query := `
+		query Entry {
+			entry(id: "123") {
+				id
+				name
+			}
+		}
+	`
+
+	resp, err := sendGraphQLQuery(url, token, query)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+
+	// Check if the entry exists
+	if resp.Data.Entry.ID != "" {
+		fmt.Printf("Entry found: ID: %s, Name: %s\n", resp.Data.Entry.ID, resp.Data.Entry.Name)
+	} else {
+		fmt.Println("No entry found.")
+	}
+
+	// Optionally, check for errors in the response
+	if len(resp.Errors) > 0 {
+		fmt.Printf("GraphQL Errors: %v\n", resp.Errors)
+	}
+}
