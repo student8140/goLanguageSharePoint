@@ -1,0 +1,16 @@
+func formatValue(value interface{}) string {
+	switch v := value.(type) {
+	case []interface{}:
+		// Convert slice of interfaces to a comma-separated string
+		var sb strings.Builder
+		for i, item := range v {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(fmt.Sprintf("%v", item))
+		}
+		return sb.String()
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
