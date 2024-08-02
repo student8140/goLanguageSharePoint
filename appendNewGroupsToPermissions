@@ -1,1 +1,114 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
+	"net/http"
+)
+
+// Define the permission target structure
+type PermissionTarget struct {
+	Name            string   `json:"name"`
+	IncludesPattern string   `json:"includesPattern"`
+	ExcludesPattern string   `json:"excludesPattern"`
+	Repositories    []string `json:"repositories"`
+	Permissions     struct {
+		Users  map[string][]string `json:"users"`
+		Groups map[string][]string `json:"groups"`
+	} `json:"permissions"`
+}
+
+func main() {
+	// JFrog Artifactory details
+	baseURL := "https://your-artifactory-instance/artifactory/api/security/permissions/"
+	permissionName := "your-permission-target-name"
+	apiKey := "your-api-key"
+
+	// Define the new groups to add
+	newGroups := map[string][]string{
+		"new-group1": {"read", "write"},
+		"new-group2": {"read"},
+	}
+
+	// Fetch the existing permission target
+	permissionTarget, err := getPermissionTarget(baseURL, permissionName, apiKey)
+	if err != nil {
+		fmt.Println("Error fetching permission target:", err)
+		return
+	}
+
+	// Append new groups to existing groups
+	for group, permissions := range newGroups {
+		if _, exists := permissionTarget.Permissions.Groups[group]; exists {
+			// If the group already exists, you might want to handle permission updates if needed
+			fmt.Printf("Group %s already exists. Updating permissions.\n", group)
+			permissionTarget.Permissions.Groups[group] = permissions
+		} else {
+			// Add new group with permissions
+			permissionTarget.Permissions.Groups[group] = permissions
+		}
+	}
+
+	// Update the permission target
+	err = updatePermissionTarget(baseURL, permissionName, apiKey, permissionTarget)
+	if err != nil {
+		fmt.Println("Error updating permission target:", err)
+		return
+	}
+
+	fmt.Println("Permission target updated successfully!")
+}
+
+// Function to get the existing permission target
+func getPermissionTarget(baseURL, permissionName, apiKey string) (*PermissionTarget, error) {
+	resp, err := http.Get(fmt.Sprintf("%s%s", baseURL, permissionName))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := ioutil.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to get permission target: %s", body)
+	}
+
+	var permissionTarget PermissionTarget
+	err = json.NewDecoder(resp.Body).Decode(&permissionTarget)
+	if err != nil {
+		return nil, err
+	}
+
+	return &permissionTarget, nil
+}
+
+// Function to update the permission target
+func updatePermissionTarget(baseURL, permissionName, apiKey string, permissionTarget *PermissionTarget) error {
+	data, err := json.Marshal(permissionTarget)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s%s", baseURL, permissionName), bytes.NewBuffer(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-JFrog-Art-Api", apiKey)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := ioutil.ReadAll(resp.Body)
+		return fmt.Errorf("failed to update permission target: %s", body)
+	}
+
+	return nil
+}
 
