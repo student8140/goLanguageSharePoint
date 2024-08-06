@@ -1,0 +1,96 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
+	"log"
+	"net/http"
+)
+
+// SharePointConfig holds the configuration for connecting to SharePoint
+type SharePointConfig struct {
+	Domain     string
+	SiteName   string
+	ListName   string
+	ItemID     int
+	AccessToken string
+}
+
+// UpdateListItemPayload represents the payload to update a list item
+type UpdateListItemPayload struct {
+	Metadata Metadata `json:"__metadata"`
+	Status   string   `json:"Status"`
+}
+
+// Metadata represents the metadata for the SharePoint list item
+type Metadata struct {
+	Type string `json:"type"`
+}
+
+func updateSharePointListItem(config SharePointConfig, status string) error {
+	// Define the REST API endpoint for updating the list item
+	url := fmt.Sprintf("https://%s/sites/%s/_api/web/lists/GetByTitle('%s')/items(%d)", config.Domain, config.SiteName, config.ListName, config.ItemID)
+
+	// Create the payload to update the list item
+	payload := UpdateListItemPayload{
+		Metadata: Metadata{
+			Type: "SP.Data.YourListNameListItem", // Replace with the correct type for your list
+		},
+		Status: status,
+	}
+
+	// Serialize the payload to JSON
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %v", err)
+	}
+
+	// Create a new HTTP request
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %v", err)
+	}
+
+	// Set the request headers
+	req.Header.Set("Authorization", "Bearer "+config.AccessToken)
+	req.Header.Set("Accept", "application/json;odata=verbose")
+	req.Header.Set("Content-Type", "application/json;odata=verbose")
+	req.Header.Set("IF-MATCH", "*")
+	req.Header.Set("X-HTTP-Method", "MERGE")
+
+	// Create an HTTP client and perform the request
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to execute request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Check the response status
+	if resp.StatusCode != http.StatusNoContent {
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		return fmt.Errorf("failed to update list item, status: %d, response: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	fmt.Println("List item updated successfully")
+	return nil
+}
+
+func main() {
+	// Configure the SharePoint connection details
+	config := SharePointConfig{
+		Domain:     "your-domain.sharepoint.com",
+		SiteName:   "your-site",
+		ListName:   "YourListName",
+		ItemID:     1,
+		AccessToken: "YOUR_ACCESS_TOKEN", // Replace with your actual access token
+	}
+
+	// Update the list item status
+	err := updateSharePointListItem(config, "Approved")
+	if err != nil {
+		log.Fatalf("Error updating list item: %v", err)
+	}
+}
