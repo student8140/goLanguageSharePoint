@@ -12,13 +12,21 @@ import (
 )
 
 func main() {
-	// Set up the JFrog Artifactory details
-	artifactoryURL := "https://your-jfrog-instance.jfrog.io/artifactory"
+	// Retrieve the JFrog Artifactory URL and API key from environment variables
+	artifactoryURL := os.Getenv("JFROG_ARTIFACTORY_URL")
 	apiKey := os.Getenv("JFROG_API_KEY")
 
+	if artifactoryURL == "" || apiKey == "" {
+		log.Fatal("Environment variables JFROG_ARTIFACTORY_URL and JFROG_API_KEY must be set")
+	}
+
 	// Configure the Artifactory client with API key
+	artifactoryDetails := artifactory.NewArtifactoryDetails()
+	artifactoryDetails.SetUrl(artifactoryURL)
+	artifactoryDetails.SetApiKey(apiKey)
+
 	serviceConfig, err := config.NewConfigBuilder().
-		SetServiceDetails(config.NewArtifactoryDetailsBuilder().SetUrl(artifactoryURL).SetApiKey(apiKey).Build()).
+		SetServiceDetails(artifactoryDetails).
 		SetLog(log.NewLogger(log.INFO, nil)).
 		Build()
 	if err != nil {
