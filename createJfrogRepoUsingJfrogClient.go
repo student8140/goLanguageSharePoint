@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/jfrog/jfrog-client-go/artifactory"
 	"github.com/jfrog/jfrog-client-go/artifactory/services"
@@ -13,12 +14,11 @@ import (
 func main() {
 	// Set up the JFrog Artifactory details
 	artifactoryURL := "https://your-jfrog-instance.jfrog.io/artifactory"
-	username := "your-username"
-	password := "your-password"
+	apiKey := os.Getenv("JFROG_API_KEY")
 
-	// Configure the Artifactory client
+	// Configure the Artifactory client with API key
 	serviceConfig, err := config.NewConfigBuilder().
-		SetServiceDetails(config.NewArtifactoryDetailsBuilder().SetUrl(artifactoryURL).SetUser(username).SetPassword(password).Build()).
+		SetServiceDetails(config.NewArtifactoryDetailsBuilder().SetUrl(artifactoryURL).SetApiKey(apiKey).Build()).
 		SetLog(log.NewLogger(log.INFO, nil)).
 		Build()
 	if err != nil {
