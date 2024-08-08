@@ -9,6 +9,7 @@ import (
 	"github.com/jfrog/jfrog-client-go/artifactory/services"
 	"github.com/jfrog/jfrog-client-go/config"
 	"github.com/jfrog/jfrog-client-go/utils/log"
+	"github.com/jfrog/jfrog-client-go/httpclient"
 )
 
 func main() {
@@ -20,11 +21,12 @@ func main() {
 		log.Fatal("Environment variables JFROG_ARTIFACTORY_URL and JFROG_API_KEY must be set")
 	}
 
-	// Configure the Artifactory client with API key
-	artifactoryDetails := artifactory.NewArtifactoryDetails()
+	// Configure the Artifactory details
+	artifactoryDetails := auth.NewArtifactoryDetails()
 	artifactoryDetails.SetUrl(artifactoryURL)
 	artifactoryDetails.SetApiKey(apiKey)
 
+	// Configure the client and logger
 	serviceConfig, err := config.NewConfigBuilder().
 		SetServiceDetails(artifactoryDetails).
 		SetLog(log.NewLogger(log.INFO, nil)).
@@ -33,7 +35,8 @@ func main() {
 		log.Fatalf("Failed to create service configuration: %v", err)
 	}
 
-	rtManager, err := artifactory.New(serviceConfig)
+	// Create the Artifactory manager
+	rtManager, err := artifactory.New(&artifactoryDetails, serviceConfig)
 	if err != nil {
 		log.Fatalf("Failed to create Artifactory manager: %v", err)
 	}
